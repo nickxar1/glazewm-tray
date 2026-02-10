@@ -23,11 +23,18 @@ class GlazeTrayApp:
 
     def query_glaze(self):
         try:
+            # We explicitly set the encoding to utf-8 to handle special characters/emojis
             result = subprocess.run(
                 ["glazewm", "query", "monitors"], 
-                capture_output=True, text=True, shell=True
+                capture_output=True, 
+                text=True, 
+                shell=True,
+                encoding='utf-8', 
+                errors='replace'   
             )
-            if result.returncode != 0: return
+            
+            if not result.stdout or result.returncode != 0: 
+                return
             
             data = json.loads(result.stdout)
             new_ws_list = []
@@ -45,13 +52,13 @@ class GlazeTrayApp:
                     for i in obj: scan(i)
 
             scan(data)
-            # Sort numerically if possible, otherwise alphabetically
             self.all_workspaces = sorted(new_ws_list, key=lambda x: x['name'])
             
             for ws in self.all_workspaces:
                 if ws['focused']:
                     self.current_ws = ws['name']
         except Exception as e:
+            # This will now print more helpful info if it fails
             print(f"Query Error: {e}")
 
     def create_icon_image(self):
