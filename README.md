@@ -1,53 +1,73 @@
-GlazeWM Tray Indicator
-A lightweight, zero-bar alternative for GlazeWM. This tool lives in your system tray and provides a real-time visual map of your workspaces without occupying any screen real estate.
+# 🪟 GlazeWM Tray Indicator
 
-🚀 Features
-Multi-Workspace Tracking: Displays the numbers of all workspaces that have active windows.
+A lightweight, minimal system tray utility for **GlazeWM**. This tool replaces the need for a bulky status bar by providing workspace information and window management directly from the Windows System Tray.
 
-Focus Highlighting: Underlines the workspace you are currently on with a blue indicator.
+---
 
-Interactive Menu: Right-click to switch workspaces, close windows, or toggle floating mode.
+## ✨ Features
 
-Dynamic Occupancy: Shows a "●" symbol in the menu for workspaces that contain windows.
+* **Multi-Workspace View:** Displays numbers for all workspaces currently containing open windows.
+* **Focus Tracking:** Highlights your active workspace with a blue underline.
+* **Occupancy Indicators:** In the menu, workspaces with windows are marked with a `●` symbol.
+* **Quick Actions:** Right-click to toggle floating, close windows, or reload your GlazeWM configuration.
+* **Click-to-Switch:** Instantly jump to any workspace by selecting it from the tray menu.
 
-Low Overhead: Written in Python; uses minimal CPU and RAM compared to full Electron-based bars.
+---
 
-🛠️ Prerequisites
-Before running the tool, you need to install the following Python libraries. Open your terminal and run:
+## 🛠️ Prerequisites
 
-PowerShell
+This tool requires **Python 3.x**. Open your terminal and run the following command to install the necessary libraries:
+```powershell
 pip install pystray pillow
-pystray: Handles the system tray icon and menu logic.
+```
+---
 
-pillow: Used to programmatically draw the workspace numbers onto the icon.
+## 🏃 How to Run
 
-🏃 How to Run
-Manual Launch
-To run the tool with a visible console (useful for debugging):
+### 1. The Regular Way (For Testing)
 
-PowerShell
+Run the script using the standard Python command. This will keep a command prompt window open, which is helpful for seeing any error messages:
+```powershell
 python glaze_tray.py
-Background Execution (.pyw)
-To run the tool without a command prompt window appearing:
+```
 
-Rename your script from glaze_tray.py to glaze_tray.pyw.
+### 2. The "Silent" Way (Background Mode)
 
-Double-click glaze_tray.pyw.
+To run the tool without a command prompt window cluttering your taskbar:
 
-The tool will now run silently in the background. You can find it in your system tray (near the clock).
+1. Rename your file from `glaze_tray.py` to `glaze_tray.pyw`.
+2. Double-click the `.pyw` file.
+3. The script will now run invisibly in the background, appearing only as an icon in your System Tray.
 
-⚙️ Auto-Start with Windows
-To have the tray indicator start automatically when you turn on your PC:
+### 3. How to Stop the Tool
 
-Press Win + R, type shell:startup, and press Enter.
+* **If running as .py:** Close the command prompt window.
+* **If running as .pyw:** Right-click the icon in the System Tray and select Exit Tray Tool.
 
-Right-click your glaze_tray.pyw file and select Create Shortcut.
+---
 
-Move that shortcut into the Startup folder you just opened.
+## ⚙️ Start Automatically with Windows
 
-⌨️ Troubleshooting
-Icon shows "Err": The script cannot communicate with GlazeWM. Ensure glazewm is in your System PATH.
+To have your tray indicator start every time you log in:
 
-Icon shows "?": The script connected to GlazeWM but couldn't find any active workspaces in the JSON data.
+1. Press `Win + R`, type `shell:startup`, and press Enter.
+2. Right-click your `glaze_tray.pyw` file and select Create Shortcut.
+3. Move that shortcut into the Startup folder you just opened.
 
-ModuleNotFoundError: Ensure you ran the pip install command using the same Python version you are using to run the script.
+---
+
+## 🎨 Customization
+
+You can adjust the appearance by editing the `COLORS` dictionary at the top of the `.pyw` file:
+
+* `bg`: Background color of the icon square.
+* `text`: Color of the workspace numbers.
+* `active`: Color of the highlight/underline for the focused workspace.
+
+---
+
+## ⚠️ Troubleshooting
+
+* **Icon shows "Err":** The script cannot find the `glazewm` command. Make sure GlazeWM is installed and added to your System PATH.
+* **Icon shows "?":** The script is running, but GlazeWM is not reporting any active monitors or workspaces.
+* **Import Errors:** If Python says "No module named pystray," re-run the `pip install` command specifically for your version: `python -m pip install pystray pillow`.
