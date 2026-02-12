@@ -188,20 +188,23 @@ class GlazeTrayApp:
     def window_monitor_loop(self):
         """Monitor for new windows and auto-toggle tiling."""
         print("🪟 Window monitor started (auto-toggle enabled)")
-        
+
         while self.running:
             try:
                 with self._lock:
                     current_count = self.window_count
                     last_count = self.last_window_count
-                
+
                 # Detect new window opened
                 if AUTO_TOGGLE_TILING and current_count > last_count:
                     print(f"📊 Window count: {last_count} → {current_count}")
+                    # Mark change as consumed so we don't double-fire
+                    with self._lock:
+                        self.last_window_count = current_count
                     self.toggle_tiling_direction()
-                
+
                 time.sleep(0.3)  # Check more frequently than main loop
-                
+
             except Exception as e:
                 print(f"Window monitor error: {e}")
                 time.sleep(1)
