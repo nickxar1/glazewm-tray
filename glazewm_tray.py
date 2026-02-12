@@ -23,14 +23,19 @@ class GlazeTrayApp:
 
     def query_glaze(self):
         try:
-            # We explicitly set the encoding to utf-8 to handle special characters/emojis
+            # Create a 'startupinfo' object to hide the console window properly 
+            # without needing shell=True
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
             result = subprocess.run(
                 ["glazewm", "query", "monitors"], 
                 capture_output=True, 
                 text=True, 
-                shell=True,
-                encoding='utf-8', 
-                errors='replace'   
+                encoding='utf-8',
+                errors='replace',
+                startupinfo=si, # Hides the window silently
+                check=False
             )
             
             if not result.stdout or result.returncode != 0: 
@@ -139,3 +144,4 @@ class GlazeTrayApp:
 
 if __name__ == "__main__":
     GlazeTrayApp().run()
+
