@@ -8,7 +8,7 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 * **Multi-Workspace View**: Displays numbers for all workspaces currently containing open windows
 * **Focus Tracking**: Highlights your active workspace with a blue underline
 * **Occupancy Indicators**: Workspaces with windows are marked with `●`, empty ones with `○`
-* **Real-time Updates**: Fast 0.5-second refresh rate for responsive workspace tracking
+* **Event-Driven Updates**: Reacts instantly to GlazeWM events via WebSocket — no polling, zero CPU when idle
 * **Window Counter**: Displays total number of open windows across all workspaces
 
 ### Window Management
@@ -22,16 +22,17 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 
 ### Reliability Features
 * **Thread-Safe Operations**: Prevents race conditions and UI freezes
-* **Error Recovery**: Automatic reconnection if GlazeWM temporarily becomes unresponsive
+* **Error Recovery**: Automatic WebSocket reconnection if GlazeWM becomes unresponsive
 * **Visual Error Indicators**: Icon changes to "!" when connection issues occur
-* **Timeout Protection**: Prevents hanging if GlazeWM queries take too long
+* **Debounced Queries**: Waits for events to settle before querying, avoiding conflicts during window creation/destruction
+* **Unfocusable Window**: Prevents the hidden pystray window from stealing focus from GlazeWM
 
 ## 🛠️ Prerequisites
 
 This tool requires **Python 3.x**. Open your terminal and run the following command to install the necessary libraries:
 
 ```bash
-pip install pystray pillow
+pip install pystray pillow websocket-client
 ```
 
 ## 🏃 How to Run
@@ -47,7 +48,7 @@ You'll see console output like:
 ```
 Starting GlazeWM tray application...
 Auto-toggle tiling: enabled
-🪟 Window monitor started (auto-toggle enabled)
+Connected to GlazeWM event stream (WebSocket)
 ```
 
 ### 2. The "Silent" Way (Background Mode)
@@ -82,11 +83,18 @@ The auto-toggle feature automatically runs the tiling direction toggle command (
 
 You can toggle this setting on/off at any time without restarting the application.
 
-### Update Frequency
-By default, the tray icon updates every 0.5 seconds. To change this:
+### Debounce Delay
+After GlazeWM events stop firing, the tray waits before querying to avoid hitting GlazeWM during critical moments (e.g. window creation). Default is 1 second:
 
 ```python
-UPDATE_INTERVAL = 0.5  # Change to 0.3 for faster, 1.0 for slower updates
+QUERY_DEBOUNCE = 1.0  # Seconds to wait after last event before querying
+```
+
+### WebSocket URL
+If GlazeWM is running on a non-default port, change the URL at the top of the script:
+
+```python
+GLAZEWM_WS_URL = "ws://127.0.0.1:6123"
 ```
 
 ### Visual Customization
@@ -114,18 +122,19 @@ Right-click the tray icon to access:
 | **Toggle Tiling (Alt+V)** | Manually toggle tiling direction |
 | **Close Window** | Close the currently focused window |
 | **Auto-Toggle on New Window** | Enable/disable automatic tiling toggle |
+| **Redraw Windows** | Redraw all managed windows |
 | **Reload GlazeWM** | Reload GlazeWM configuration |
 | **Exit Tray Tool** | Close the tray application |
 
 ## ⚠️ Troubleshooting
 
 ### Icon shows "!"
-The script cannot communicate with GlazeWM. Possible causes:
+The script cannot communicate with GlazeWM via WebSocket. Possible causes:
 * GlazeWM is not running
-* GlazeWM is not in your System PATH
+* GlazeWM's WebSocket server is not listening on port 6123
 * GlazeWM is temporarily unresponsive
 
-**Fix**: Make sure GlazeWM is installed and running. Verify it's in your PATH by running `glazewm --version` in a command prompt.
+**Fix**: Make sure GlazeWM is installed and running. The tool connects via `ws://127.0.0.1:6123`.
 
 ### Icon shows "?"
 The script is running, but GlazeWM is not reporting any active monitors or workspaces.
@@ -136,7 +145,7 @@ The script is running, but GlazeWM is not reporting any active monitors or works
 If Python says "No module named pystray," re-run the pip install command specifically for your Python version:
 
 ```bash
-python -m pip install pystray pillow
+python -m pip install pystray pillow websocket-client
 ```
 
 ### Windows Not Being Tracked
@@ -144,24 +153,6 @@ If new windows aren't being detected:
 1. Check the console output (run as `.py` instead of `.pyw`)
 2. Verify GlazeWM is properly managing the windows
 3. Try toggling the Auto-Toggle feature off and on
-
-### High CPU Usage
-If the tray tool is using too much CPU:
-1. Increase `UPDATE_INTERVAL` from 0.5 to 1.0 seconds
-2. Check if GlazeWM itself is having performance issues
-
-## 🔧 Advanced Usage
-
-### Running with Custom GlazeWM Location
-If `glazewm` is not in your PATH, you can modify the subprocess calls in the script to use the full path:
-
-```python
-# Find this line in the script:
-["glazewm", "query", "monitors"]
-
-# Replace with:
-[r"C:\Path\To\glazewm.exe", "query", "monitors"]
-```
 
 ### Logging for Debugging
 To see detailed logs, run the script as `.py` (not `.pyw`) and check the console output. You'll see:
