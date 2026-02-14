@@ -4,10 +4,14 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 
 ## ✨ Features
 
+### Display Modes (both enabled by default)
+* **Floating Bar**: A wider, always-visible bar that sits on the taskbar (left of the system tray) showing workspace numbers with real app icons for each window. Click any workspace to switch to it. Hover over icons to see window titles.
+* **Tray Icon**: Compact system tray icon showing up to 3 workspace numbers with a blue underline on the focused one. Right-click for full workspace menu with window titles.
+
 ### Core Functionality
 * **Multi-Workspace View**: Displays numbers for all workspaces currently containing open windows
-* **Window List per Workspace**: Right-click menu shows window titles under each workspace
-* **Focus Tracking**: Highlights your active workspace with a blue underline
+* **Window List per Workspace**: Shows window app icons (floating bar) or titles (tray menu) under each workspace
+* **Focus Tracking**: Highlights your active workspace with blue
 * **Occupancy Indicators**: Workspaces with windows are marked with `●`, empty ones with `○`
 * **Event-Driven Updates**: Reacts instantly to GlazeWM events via WebSocket — no polling, zero CPU when idle
 * **Window Counter**: Displays total number of open windows across all workspaces
@@ -19,7 +23,7 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
   - Toggle Tiling Direction (Alt+V equivalent)
   - Close active window
   - Reload GlazeWM configuration
-* **Click-to-Switch**: Instantly jump to any workspace by selecting it from the tray menu
+* **Click-to-Switch**: Instantly jump to any workspace by clicking its number
 
 ### Reliability Features
 * **Thread-Safe Operations**: Prevents race conditions and UI freezes
@@ -74,6 +78,14 @@ To have your tray indicator start every time you log in:
 **Pro Tip**: Use the `.pyw` version for startup to avoid having a command window appear on boot.
 
 ## 🎛️ Configuration
+
+### Display Mode
+Both the floating bar and tray icon are enabled by default. You can disable either one:
+
+```python
+USE_FLOATING_BAR = True  # Set False to disable the floating bar on the taskbar
+USE_TRAY_ICON = True     # Set False to disable the system tray icon
+```
 
 ### Auto-Toggle Tiling Feature
 The auto-toggle feature automatically runs the tiling direction toggle command (equivalent to Alt+V) whenever a new window is detected. This helps maintain optimal layouts as you open new applications.

@@ -9,6 +9,8 @@ import sys
 import os
 import ctypes
 from ctypes import wintypes
+import tkinter as tk
+from PIL import ImageTk
 
 # --- Configuration ---
 COLORS = {
@@ -22,6 +24,8 @@ COLORS = {
 GLAZEWM_WS_URL = "ws://127.0.0.1:6123"
 AUTO_TOGGLE_TILING = True  # Set to False to disable auto-toggle feature
 QUERY_DEBOUNCE = 1.0  # Seconds to wait after last event before querying
+USE_FLOATING_BAR = True  # Set False to disable the floating bar
+USE_TRAY_ICON = True     # Set False to disable the tray icon
 
 # Events to subscribe to
 SUBSCRIBE_EVENTS = [
@@ -61,12 +65,444 @@ def make_process_windows_unfocusable():
         print(f"Set WS_EX_NOACTIVATE on {len(found)} process window(s)")
 
 
+# --- Win32 icon extraction ---
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+TH32CS_SNAPPROCESS = 0x00000002
+MAX_PATH = 260
+DI_NORMAL = 0x0003
+SHGFI_ICON = 0x000000100
+SHGFI_SMALLICON = 0x000000001
+SHGFI_LARGEICON = 0x000000000
+
+
+class PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD),
+        ("cntUsage", wintypes.DWORD),
+        ("th32ProcessID", wintypes.DWORD),
+        ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+        ("th32ModuleID", wintypes.DWORD),
+        ("cntThreads", wintypes.DWORD),
+        ("th32ParentProcessID", wintypes.DWORD),
+        ("pcPriClassBase", ctypes.c_long),
+        ("dwFlags", wintypes.DWORD),
+        ("szExeFile", ctypes.c_wchar * MAX_PATH),
+    ]
+
+
+class SHFILEINFOW(ctypes.Structure):
+    _fields_ = [
+        ("hIcon", wintypes.HICON),
+        ("iIcon", ctypes.c_int),
+        ("dwAttributes", wintypes.DWORD),
+        ("szDisplayName", ctypes.c_wchar * MAX_PATH),
+        ("szTypeName", ctypes.c_wchar * 80),
+    ]
+
+
+class BITMAPINFOHEADER(ctypes.Structure):
+    _fields_ = [
+        ("biSize", wintypes.DWORD),
+        ("biWidth", wintypes.LONG),
+        ("biHeight", wintypes.LONG),
+        ("biPlanes", wintypes.WORD),
+        ("biBitCount", wintypes.WORD),
+        ("biCompression", wintypes.DWORD),
+        ("biSizeImage", wintypes.DWORD),
+        ("biXPelsPerMeter", wintypes.LONG),
+        ("biYPelsPerMeter", wintypes.LONG),
+        ("biClrUsed", wintypes.DWORD),
+        ("biClrImportant", wintypes.DWORD),
+    ]
+
+
+def _get_exe_path_for_process(process_name):
+    """Find the full exe path for a process by name using toolhelp snapshots (Unicode)."""
+    target = process_name.lower()
+    if not target.endswith('.exe'):
+        target += '.exe'
+
+    kernel32 = ctypes.windll.kernel32
+    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snapshot == -1:
+        return None
+
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+
+        if not kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+            return None
+
+        while True:
+            if entry.szExeFile.lower() == target:
+                pid = entry.th32ProcessID
+                handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+                if handle:
+                    try:
+                        buf = ctypes.create_unicode_buffer(MAX_PATH)
+                        size = wintypes.DWORD(MAX_PATH)
+                        if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                            return buf.value
+                    finally:
+                        kernel32.CloseHandle(handle)
+            if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                break
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return None
+
+
+def _hicon_to_pil(hicon, out_size=16):
+    """Convert HICON to PIL Image using DrawIconEx into a DIB section."""
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+
+    # Use 32x32 render size for quality, then resize
+    render_size = 32
+
+    hdc_screen = user32.GetDC(0)
+    hdc = gdi32.CreateCompatibleDC(hdc_screen)
+
+    bmi = BITMAPINFOHEADER()
+    bmi.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+    bmi.biWidth = render_size
+    bmi.biHeight = -render_size  # top-down
+    bmi.biPlanes = 1
+    bmi.biBitCount = 32
+    bmi.biCompression = 0
+
+    bits = ctypes.c_void_p()
+    hbm = gdi32.CreateDIBSection(hdc, ctypes.byref(bmi), 0, ctypes.byref(bits), None, 0)
+    if not hbm:
+        gdi32.DeleteDC(hdc)
+        user32.ReleaseDC(0, hdc_screen)
+        return None
+
+    old_bm = gdi32.SelectObject(hdc, hbm)
+
+    # Draw icon stretched to render_size
+    user32.DrawIconEx(hdc, 0, 0, hicon, render_size, render_size, 0, 0, DI_NORMAL)
+
+    # Read pixels
+    buf_size = render_size * render_size * 4
+    buf = (ctypes.c_byte * buf_size)()
+    ctypes.memmove(buf, bits, buf_size)
+
+    # Cleanup GDI
+    gdi32.SelectObject(hdc, old_bm)
+    gdi32.DeleteObject(hbm)
+    gdi32.DeleteDC(hdc)
+    user32.ReleaseDC(0, hdc_screen)
+
+    # BGRA -> RGBA
+    raw = bytearray(buf)
+    for i in range(0, len(raw), 4):
+        raw[i], raw[i + 2] = raw[i + 2], raw[i]
+
+    img = Image.frombytes('RGBA', (render_size, render_size), bytes(raw))
+
+    # Check if image is all transparent/black (failed render)
+    if img.getextrema()[3][1] == 0:  # alpha channel max is 0
+        return None
+
+    if render_size != out_size:
+        img = img.resize((out_size, out_size), Image.LANCZOS)
+    return img
+
+
+def _get_icon_via_shgetfileinfo(exe_path):
+    """Get HICON using SHGetFileInfoW — reliable for most exe files."""
+    info = SHFILEINFOW()
+    result = ctypes.windll.shell32.SHGetFileInfoW(
+        exe_path, 0, ctypes.byref(info), ctypes.sizeof(SHFILEINFOW),
+        SHGFI_ICON | SHGFI_LARGEICON
+    )
+    if result and info.hIcon:
+        return info.hIcon
+    return None
+
+
+def get_process_icon(process_name, size=16, _cache={}, _failures={}):
+    """Get an app icon as a PIL Image for a given process name.
+    Uses SHGetFileInfoW (most reliable) with ExtractIconExW as fallback.
+    Retries up to 3 times for processes not yet ready."""
+    if process_name in _cache:
+        return _cache[process_name]
+
+    if _failures.get(process_name, 0) >= 3:
+        return None
+
+    icon_img = None
+    try:
+        exe_path = _get_exe_path_for_process(process_name)
+        if exe_path:
+            # Method 1: SHGetFileInfoW (most reliable)
+            hicon = _get_icon_via_shgetfileinfo(exe_path)
+            if hicon:
+                try:
+                    icon_img = _hicon_to_pil(hicon, size)
+                finally:
+                    ctypes.windll.user32.DestroyIcon(hicon)
+
+            # Method 2: ExtractIconExW (fallback - gets large icon)
+            if not icon_img:
+                hicon_large = wintypes.HICON()
+                result = ctypes.windll.shell32.ExtractIconExW(
+                    exe_path, 0, ctypes.byref(hicon_large), None, 1
+                )
+                if result > 0 and hicon_large.value:
+                    try:
+                        icon_img = _hicon_to_pil(hicon_large.value, size)
+                    finally:
+                        ctypes.windll.user32.DestroyIcon(hicon_large.value)
+    except Exception as e:
+        print(f"Icon extraction failed for {process_name}: {e}")
+
+    if icon_img:
+        _cache[process_name] = icon_img
+    else:
+        _failures[process_name] = _failures.get(process_name, 0) + 1
+        if _failures[process_name] == 1:
+            print(f"Icon not found for: {process_name}")
+    return icon_img
+
+
+def _make_fallback_icon(letter, size=16):
+    """Create a small colored circle with a letter as fallback icon."""
+    img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.ellipse([1, 1, size - 2, size - 2], fill=(80, 80, 80, 200))
+    try:
+        font = ImageFont.truetype("arial.ttf", size - 6)
+    except Exception:
+        font = ImageFont.load_default()
+    bbox = d.textbbox((0, 0), letter, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    d.text(((size - tw) / 2, (size - th) / 2 - 1), letter, fill=(255, 255, 255), font=font)
+    return img
+
+
+# --- Floating Bar ---
+
+class FloatingBar:
+    """A borderless always-on-top tkinter window showing workspace info."""
+
+    BAR_HEIGHT = 32
+    ICON_SIZE = 16
+    PADDING = 6
+
+    def __init__(self, app):
+        self.app = app
+        self.root = tk.Tk()
+        self.root.withdraw()  # Hide root window
+
+        self.bar = tk.Toplevel(self.root)
+        self.bar.overrideredirect(True)  # Borderless
+        self.bar.attributes('-topmost', True)
+        self.bar.configure(bg=self._rgb(COLORS["bg"]))
+
+        # Container frame
+        self.frame = tk.Frame(self.bar, bg=self._rgb(COLORS["bg"]))
+        self.frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+
+        # Keep references to PhotoImages so they're not garbage collected
+        self._photo_refs = []
+
+        # Right-click context menu
+        self._context_menu = self._build_context_menu()
+        self.bar.bind('<Button-3>', self._show_context_menu)
+
+        # Position bar bottom-right, above taskbar
+        self._position_bar()
+
+        # Apply Win32 flags after window is mapped
+        self.bar.after(100, self._apply_win32_flags)
+
+    @staticmethod
+    def _rgb(color_tuple):
+        """Convert (r, g, b) to tkinter hex color."""
+        return f'#{color_tuple[0]:02x}{color_tuple[1]:02x}{color_tuple[2]:02x}'
+
+    def _position_bar(self, width=300):
+        """Position bar on the taskbar, to the left of the system tray."""
+        user32 = ctypes.windll.user32
+
+        # Find the taskbar and tray notification area
+        taskbar_hwnd = user32.FindWindowW("Shell_TrayWnd", None)
+        if not taskbar_hwnd:
+            # Fallback: bottom-right of screen
+            screen_w = self.root.winfo_screenwidth()
+            screen_h = self.root.winfo_screenheight()
+            self.bar.geometry(f'{width}x{self.BAR_HEIGHT}+{screen_w - width - 8}+{screen_h - self.BAR_HEIGHT}')
+            return
+
+        # Get taskbar rect
+        taskbar_rect = wintypes.RECT()
+        user32.GetWindowRect(taskbar_hwnd, ctypes.byref(taskbar_rect))
+
+        # Find the tray notification area to position left of it
+        tray_hwnd = user32.FindWindowExW(taskbar_hwnd, None, "TrayNotifyWnd", None)
+        if tray_hwnd:
+            tray_rect = wintypes.RECT()
+            user32.GetWindowRect(tray_hwnd, ctypes.byref(tray_rect))
+            # Place bar just to the left of the tray area
+            x = tray_rect.left - width - 4
+        else:
+            x = taskbar_rect.right - width - 200
+
+        # Vertically center on the taskbar
+        taskbar_h = taskbar_rect.bottom - taskbar_rect.top
+        y = taskbar_rect.top + (taskbar_h - self.BAR_HEIGHT) // 2
+        self.bar.geometry(f'{width}x{self.BAR_HEIGHT}+{x}+{y}')
+
+    def _apply_win32_flags(self):
+        """Set WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW on the bar window."""
+        hwnd = int(self.bar.wm_frame(), 16) if self.bar.wm_frame() else None
+        if not hwnd:
+            # Fallback: find by title
+            hwnd = self.bar.winfo_id()
+        try:
+            # Get the actual top-level HWND from the tk widget id
+            hwnd = ctypes.windll.user32.GetParent(hwnd) or hwnd
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            new_style = style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
+        except Exception as e:
+            print(f"Failed to set bar Win32 flags: {e}")
+
+    def _build_context_menu(self):
+        """Build right-click context menu matching pystray menu."""
+        menu = tk.Menu(self.bar, tearoff=0,
+                       bg=self._rgb(COLORS["bg"]),
+                       fg=self._rgb(COLORS["text"]),
+                       activebackground=self._rgb(COLORS["active"]),
+                       activeforeground='white')
+        menu.add_command(label="Toggle Floating", command=lambda: self.app.run_cmd("toggle-floating"))
+        menu.add_command(label="Toggle Tiling (Alt+V)", command=lambda: self.app.run_cmd("toggle-tiling-direction"))
+        menu.add_command(label="Close Window", command=lambda: self.app.run_cmd("close"))
+        menu.add_separator()
+        menu.add_command(label="Redraw Windows", command=lambda: self.app.run_cmd("wm-redraw"))
+        menu.add_command(label="Reload GlazeWM", command=lambda: self.app.run_cmd("reload-config"))
+        menu.add_separator()
+        menu.add_command(label="Exit", command=self._on_exit)
+        return menu
+
+    def _show_context_menu(self, event):
+        try:
+            self._context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._context_menu.grab_release()
+
+    def _on_exit(self):
+        self.app.running = False
+        self.app._event.set()
+        for ws in [self.app._ws_sub, self.app._ws_cmd]:
+            if ws:
+                try:
+                    ws.close()
+                except:
+                    pass
+        self.root.destroy()
+
+    def update_bar(self):
+        """Rebuild the bar contents from current workspace data."""
+        # Clear existing widgets
+        for widget in self.frame.winfo_children():
+            widget.destroy()
+        self._photo_refs.clear()
+
+        with self.app._lock:
+            workspaces = list(self.app.all_workspaces)
+
+        if not workspaces:
+            lbl = tk.Label(self.frame, text="?" if self.app.error_count <= 3 else "!",
+                           fg=self._rgb(COLORS["error"] if self.app.error_count > 3 else COLORS["text"]),
+                           bg=self._rgb(COLORS["bg"]),
+                           font=("Arial", 12, "bold"))
+            lbl.pack(side=tk.LEFT, padx=4)
+            self._position_bar(60)
+            return
+
+        total_width = self.PADDING
+        for i, ws in enumerate(workspaces):
+            name = ws['name']
+            is_focused = ws['focused']
+            has_windows = ws['resident']
+            windows = ws.get('windows', [])
+
+            # Separator between workspaces
+            if i > 0:
+                sep = tk.Frame(self.frame, width=1, bg=self._rgb(COLORS["inactive"]))
+                sep.pack(side=tk.LEFT, fill=tk.Y, padx=3, pady=4)
+                total_width += 7
+
+            # Workspace number
+            num_bg = COLORS["active"] if is_focused else COLORS["bg"]
+            num_fg = COLORS["text"] if has_windows or is_focused else COLORS["inactive"]
+            num_label = tk.Label(self.frame, text=name, font=("Arial", 11, "bold"),
+                                 fg=self._rgb(num_fg), bg=self._rgb(num_bg),
+                                 padx=4, pady=0, cursor="hand2")
+            num_label.pack(side=tk.LEFT, padx=(2, 1))
+            num_label.bind('<Button-1>', lambda e, n=name: self.app.run_cmd(f"focus --workspace {n}"))
+            total_width += 28
+
+            # Window icons + short process name
+            for win in windows:
+                process = win.get('process', '')
+                title = win.get('title', '') or process or '?'
+
+                # Container for icon + label side by side
+                win_frame = tk.Frame(self.frame, bg=self._rgb(COLORS["bg"]), cursor="hand2")
+                win_frame.pack(side=tk.LEFT, padx=(2, 0))
+
+                # Try to get real icon
+                icon_img = get_process_icon(process, self.ICON_SIZE)
+                if not icon_img:
+                    icon_img = _make_fallback_icon(process[:1].upper() if process else '?', self.ICON_SIZE)
+                photo = ImageTk.PhotoImage(icon_img)
+                self._photo_refs.append(photo)
+                icon_lbl = tk.Label(win_frame, image=photo, bg=self._rgb(COLORS["bg"]))
+                icon_lbl.pack(side=tk.LEFT)
+
+                # Short process name label
+                short_name = process[:8] if process else '?'
+                name_lbl = tk.Label(win_frame, text=short_name, font=("Arial", 7),
+                                    fg=self._rgb(COLORS["inactive"]),
+                                    bg=self._rgb(COLORS["bg"]))
+                name_lbl.pack(side=tk.LEFT, padx=(1, 0))
+
+                # Estimate width: icon + text
+                total_width += self.ICON_SIZE + len(short_name) * 5 + 6
+
+                # Click any part to switch workspace
+                for w in (win_frame, icon_lbl, name_lbl):
+                    w.bind('<Button-1>', lambda e, n=name: self.app.run_cmd(f"focus --workspace {n}"))
+
+        total_width += self.PADDING
+        total_width = max(total_width, 60)
+        self._position_bar(total_width)
+
+    def schedule_update(self):
+        """Thread-safe: schedule a bar update on the tk mainloop."""
+        try:
+            self.root.after_idle(self.update_bar)
+        except tk.TclError:
+            pass  # Window destroyed
+
+    def run(self):
+        """Start the tkinter mainloop."""
+        self.update_bar()
+        self.root.mainloop()
+
+
 class GlazeTrayApp:
     def __init__(self):
         self.running = True
         self.current_ws = "?"
         self.all_workspaces = []
         self.icon = None
+        self.bar = None  # FloatingBar instance
         self.last_error = None
         self.error_count = 0
         self._lock = threading.Lock()
@@ -141,6 +577,9 @@ class GlazeTrayApp:
                             "title": node.get('title', ''),
                             "process": node.get('processName', '')
                         })
+                        # Don't recurse into window children
+                        return wins
+                    # Recurse into split containers and other non-window nodes
                     for v in node.values():
                         if isinstance(v, (dict, list)):
                             wins.extend(collect_windows(v))
@@ -246,9 +685,7 @@ class GlazeTrayApp:
         self.run_cmd("toggle-tiling-direction")
 
     def _refresh_icon(self):
-        """Update tray icon and menu only if state has changed."""
-        if not self.icon:
-            return
+        """Update tray icon/floating bar only if state has changed."""
         try:
             with self._lock:
                 state_key = (
@@ -264,8 +701,12 @@ class GlazeTrayApp:
             if state_key == self._last_state:
                 return
             self._last_state = state_key
-            self.icon.icon = self.create_icon_image()
-            self.icon.menu = self.generate_menu()
+
+            if self.bar:
+                self.bar.schedule_update()
+            if self.icon:
+                self.icon.icon = self.create_icon_image()
+                self.icon.menu = self.generate_menu()
         except Exception as e:
             print(f"Icon update error: {e}")
 
@@ -456,7 +897,7 @@ class GlazeTrayApp:
         time.sleep(1)
         make_process_windows_unfocusable()
 
-    def on_exit(self, icon, item):
+    def on_exit(self, icon=None, item=None):
         """Clean shutdown."""
         print("Shutting down GlazeWM tray...")
         self.running = False
@@ -467,20 +908,24 @@ class GlazeTrayApp:
                     ws.close()
                 except:
                     pass
-        icon.stop()
+        if self.icon:
+            try:
+                self.icon.stop()
+            except Exception:
+                pass
+        if self.bar:
+            try:
+                self.bar.root.destroy()
+            except Exception:
+                pass
 
     def run(self):
         """Start the tray application."""
         print("Starting GlazeWM tray application...")
         print(f"Auto-toggle tiling: {'enabled' if AUTO_TOGGLE_TILING else 'disabled'}")
+        print(f"Floating bar: {'enabled' if USE_FLOATING_BAR else 'disabled'}")
+        print(f"Tray icon: {'enabled' if USE_TRAY_ICON else 'disabled'}")
         self.query_glaze()
-
-        self.icon = pystray.Icon(
-            "GlazeWM",
-            self.create_icon_image(),
-            "GlazeWM Workspace Manager",
-            self.generate_menu()
-        )
 
         # Start event listener (WebSocket subscription, no querying)
         threading.Thread(target=self.event_loop, daemon=True).start()
@@ -488,9 +933,32 @@ class GlazeTrayApp:
         # Start debounced refresh loop (queries only after events settle)
         threading.Thread(target=self.debounce_loop, daemon=True).start()
 
-        # Apply WS_EX_NOACTIVATE after pystray creates its window
-        threading.Thread(target=self._apply_noactivate_delayed, daemon=True).start()
+        if USE_TRAY_ICON:
+            self.icon = pystray.Icon(
+                "GlazeWM",
+                self.create_icon_image(),
+                "GlazeWM Workspace Manager",
+                self.generate_menu()
+            )
 
+        if USE_FLOATING_BAR:
+            # Floating bar runs on main thread (tkinter mainloop)
+            # Tray icon runs in background thread if enabled
+            if self.icon:
+                threading.Thread(target=self._run_tray_icon, daemon=True).start()
+            self.bar = FloatingBar(self)
+            self.bar.run()
+        elif self.icon:
+            # Only tray icon, run on main thread
+            threading.Thread(target=self._apply_noactivate_delayed, daemon=True).start()
+            self.icon.run()
+        else:
+            print("Error: Both USE_FLOATING_BAR and USE_TRAY_ICON are disabled!")
+
+    def _run_tray_icon(self):
+        """Run pystray icon in a background thread."""
+        time.sleep(0.5)
+        make_process_windows_unfocusable()
         self.icon.run()
 
 
