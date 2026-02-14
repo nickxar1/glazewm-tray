@@ -268,8 +268,13 @@ def get_process_icon(process_name, size=16, _cache={}, _failures={}):
     return icon_img
 
 
+_fallback_cache = {}
+
 def _make_fallback_icon(letter, size=16):
-    """Create a small colored circle with a letter as fallback icon."""
+    """Create a small colored circle with a letter as fallback icon (cached)."""
+    key = (letter, size)
+    if key in _fallback_cache:
+        return _fallback_cache[key]
     img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.ellipse([1, 1, size - 2, size - 2], fill=(80, 80, 80, 200))
@@ -280,7 +285,42 @@ def _make_fallback_icon(letter, size=16):
     bbox = d.textbbox((0, 0), letter, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     d.text(((size - tw) / 2, (size - th) / 2 - 1), letter, fill=(255, 255, 255), font=font)
+    _fallback_cache[key] = img
     return img
+
+
+def _is_fullscreen_active():
+    """Check if the foreground window is fullscreen (covers entire monitor)."""
+    user32 = ctypes.windll.user32
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return False
+
+    # Get foreground window rect
+    rect = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+
+    # Get the monitor this window is on
+    monitor = user32.MonitorFromWindow(hwnd, 2)  # MONITOR_DEFAULTTONEAREST
+    if not monitor:
+        return False
+
+    class MONITORINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", wintypes.RECT),
+            ("rcWork", wintypes.RECT),
+            ("dwFlags", wintypes.DWORD),
+        ]
+
+    mi = MONITORINFO()
+    mi.cbSize = ctypes.sizeof(MONITORINFO)
+    user32.GetMonitorInfoW(monitor, ctypes.byref(mi))
+
+    # Fullscreen = window rect covers entire monitor
+    mr = mi.rcMonitor
+    return (rect.left <= mr.left and rect.top <= mr.top and
+            rect.right >= mr.right and rect.bottom >= mr.bottom)
 
 
 # --- Floating Bar ---
@@ -313,11 +353,17 @@ class FloatingBar:
         self._context_menu = self._build_context_menu()
         self.bar.bind('<Button-3>', self._show_context_menu)
 
+        # Fullscreen tracking
+        self._bar_hidden = False
+
         # Position bar bottom-right, above taskbar
         self._position_bar()
 
         # Apply Win32 flags after window is mapped
         self.bar.after(100, self._apply_win32_flags)
+
+        # Start fullscreen check loop (every 2 seconds)
+        self._check_fullscreen()
 
     @staticmethod
     def _rgb(color_tuple):
@@ -371,6 +417,10 @@ class FloatingBar:
         except Exception as e:
             print(f"Failed to set bar Win32 flags: {e}")
 
+    def _run_cmd_async(self, cmd):
+        """Run a GlazeWM command in a background thread to avoid blocking tk."""
+        threading.Thread(target=self.app.run_cmd, args=(cmd,), daemon=True).start()
+
     def _build_context_menu(self):
         """Build right-click context menu matching pystray menu."""
         menu = tk.Menu(self.bar, tearoff=0,
@@ -378,21 +428,18 @@ class FloatingBar:
                        fg=self._rgb(COLORS["text"]),
                        activebackground=self._rgb(COLORS["active"]),
                        activeforeground='white')
-        menu.add_command(label="Toggle Floating", command=lambda: self.app.run_cmd("toggle-floating"))
-        menu.add_command(label="Toggle Tiling (Alt+V)", command=lambda: self.app.run_cmd("toggle-tiling-direction"))
-        menu.add_command(label="Close Window", command=lambda: self.app.run_cmd("close"))
+        menu.add_command(label="Toggle Floating", command=lambda: self._run_cmd_async("toggle-floating"))
+        menu.add_command(label="Toggle Tiling (Alt+V)", command=lambda: self._run_cmd_async("toggle-tiling-direction"))
+        menu.add_command(label="Close Window", command=lambda: self._run_cmd_async("close"))
         menu.add_separator()
-        menu.add_command(label="Redraw Windows", command=lambda: self.app.run_cmd("wm-redraw"))
-        menu.add_command(label="Reload GlazeWM", command=lambda: self.app.run_cmd("reload-config"))
+        menu.add_command(label="Redraw Windows", command=lambda: self._run_cmd_async("wm-redraw"))
+        menu.add_command(label="Reload GlazeWM", command=lambda: self._run_cmd_async("reload-config"))
         menu.add_separator()
         menu.add_command(label="Exit", command=self._on_exit)
         return menu
 
     def _show_context_menu(self, event):
-        try:
-            self._context_menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            self._context_menu.grab_release()
+        self._context_menu.tk_popup(event.x_root, event.y_root, 0)
 
     def _on_exit(self):
         self.app.running = False
@@ -407,6 +454,9 @@ class FloatingBar:
 
     def update_bar(self):
         """Rebuild the bar contents from current workspace data."""
+        if self._bar_hidden:
+            return  # Skip rebuilding while hidden
+
         # Clear existing widgets
         for widget in self.frame.winfo_children():
             widget.destroy()
@@ -444,7 +494,7 @@ class FloatingBar:
                                  fg=self._rgb(num_fg), bg=self._rgb(num_bg),
                                  padx=4, pady=0, cursor="hand2")
             num_label.pack(side=tk.LEFT, padx=(2, 1))
-            num_label.bind('<Button-1>', lambda e, n=name: self.app.run_cmd(f"focus --workspace {n}"))
+            num_label.bind('<Button-1>', lambda e, n=name: self._run_cmd_async(f"focus --workspace {n}"))
             total_width += 28
 
             # Window icons + short process name
@@ -477,11 +527,27 @@ class FloatingBar:
 
                 # Click any part to switch workspace
                 for w in (win_frame, icon_lbl, name_lbl):
-                    w.bind('<Button-1>', lambda e, n=name: self.app.run_cmd(f"focus --workspace {n}"))
+                    w.bind('<Button-1>', lambda e, n=name: self._run_cmd_async(f"focus --workspace {n}"))
 
         total_width += self.PADDING
         total_width = max(total_width, 60)
         self._position_bar(total_width)
+
+    def _check_fullscreen(self):
+        """Periodically check if a fullscreen app is active and hide/show bar."""
+        try:
+            if _is_fullscreen_active():
+                if not self._bar_hidden:
+                    self.bar.withdraw()
+                    self._bar_hidden = True
+            else:
+                if self._bar_hidden:
+                    self.bar.deiconify()
+                    self._bar_hidden = False
+        except Exception:
+            pass
+        # Check every 2 seconds
+        self.root.after(2000, self._check_fullscreen)
 
     def schedule_update(self):
         """Thread-safe: schedule a bar update on the tk mainloop."""

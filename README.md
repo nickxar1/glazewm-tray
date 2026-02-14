@@ -5,7 +5,7 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 ## ✨ Features
 
 ### Display Modes (both enabled by default)
-* **Floating Bar**: A wider, always-visible bar that sits on the taskbar (left of the system tray) showing workspace numbers with real app icons for each window. Click any workspace to switch to it. Hover over icons to see window titles.
+* **Floating Bar**: A wider bar that sits on the taskbar (left of the system tray) showing workspace numbers with real app icons for each window. Click any workspace to switch to it. Auto-hides during fullscreen apps (games, videos, etc.).
 * **Tray Icon**: Compact system tray icon showing up to 3 workspace numbers with a blue underline on the focused one. Right-click for full workspace menu with window titles.
 
 ### Core Functionality
