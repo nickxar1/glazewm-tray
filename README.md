@@ -6,6 +6,7 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 
 ### Core Functionality
 * **Multi-Workspace View**: Displays numbers for all workspaces currently containing open windows
+* **Window List per Workspace**: Right-click menu shows window titles under each workspace
 * **Focus Tracking**: Highlights your active workspace with a blue underline
 * **Occupancy Indicators**: Workspaces with windows are marked with `●`, empty ones with `○`
 * **Event-Driven Updates**: Reacts instantly to GlazeWM events via WebSocket — no polling, zero CPU when idle

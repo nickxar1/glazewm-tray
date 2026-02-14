@@ -132,23 +132,42 @@ class GlazeTrayApp:
             new_ws_list = []
             total_windows = 0
 
+            def collect_windows(node):
+                """Recursively collect window titles from a container tree."""
+                wins = []
+                if isinstance(node, dict):
+                    if node.get('type') == 'window':
+                        wins.append({
+                            "title": node.get('title', ''),
+                            "process": node.get('processName', '')
+                        })
+                    for v in node.values():
+                        if isinstance(v, (dict, list)):
+                            wins.extend(collect_windows(v))
+                elif isinstance(node, list):
+                    for el in node:
+                        if isinstance(el, (dict, list)):
+                            wins.extend(collect_windows(el))
+                return wins
+
             stack = [data]
             while stack:
                 obj = stack.pop()
                 if isinstance(obj, dict):
                     obj_type = obj.get('type')
                     if obj_type == 'workspace':
-                        children = obj.get('children', [])
+                        windows = collect_windows(obj.get('children', []))
+                        total_windows += len(windows)
                         new_ws_list.append({
                             "name": str(obj.get('name')),
                             "focused": obj.get('hasFocus', False),
-                            "resident": len(children) > 0
+                            "resident": len(windows) > 0,
+                            "windows": windows
                         })
-                    elif obj_type == 'window':
-                        total_windows += 1
-                    for v in obj.values():
-                        if isinstance(v, (dict, list)):
-                            stack.append(v)
+                    else:
+                        for v in obj.values():
+                            if isinstance(v, (dict, list)):
+                                stack.append(v)
                 elif isinstance(obj, list):
                     for el in obj:
                         if isinstance(el, (dict, list)):
@@ -234,7 +253,8 @@ class GlazeTrayApp:
             with self._lock:
                 state_key = (
                     tuple(
-                        (ws['name'], ws['focused'], ws['resident'])
+                        (ws['name'], ws['focused'], ws['resident'],
+                         tuple(w.get('title', '') for w in ws.get('windows', [])))
                         for ws in self.all_workspaces
                     ),
                     self.window_count,
@@ -371,6 +391,7 @@ class GlazeTrayApp:
                 name = ws['name']
                 is_focused = ws['focused']
                 has_windows = ws['resident']
+                windows = ws.get('windows', [])
 
                 if has_windows:
                     label = f"● {name}"
@@ -388,6 +409,16 @@ class GlazeTrayApp:
                     make_focus_handler(name),
                     checked=make_check_handler(is_focused)
                 ))
+
+                for win in windows:
+                    title = win.get('title', '') or win.get('process', 'Unknown')
+                    if len(title) > 40:
+                        title = title[:37] + "..."
+                    menu_items.append(item(
+                        f"    └ {title}",
+                        make_focus_handler(name),
+                        enabled=True
+                    ))
 
         menu_items.append(pystray.Menu.SEPARATOR)
         menu_items.append(item(f"Total Windows: {win_count}", lambda: None, enabled=False))
