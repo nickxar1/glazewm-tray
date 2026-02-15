@@ -2,6 +2,17 @@
 
 A lightweight, minimal system tray utility for GlazeWM. This tool replaces the need for a bulky status bar by providing workspace information and window management directly from the Windows System Tray.
 
+## 📸 Example
+
+**Floating bar on the taskbar** 
+![Floating bar](docs/fulltaskbar.png)
+
+**Tray icon**  
+![Tray icon](docs/trayicon.png) 
+
+**Right-click menu**  
+![Right-click menu](docs/rightclick_tray_settings.png)
+
 ## ✨ Features
 
 ### Display Modes (both enabled by default)
@@ -32,6 +43,21 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 * **Debounced Queries**: Waits for events to settle before querying, avoiding conflicts during window creation/destruction
 * **Unfocusable Window**: Prevents the hidden pystray window from stealing focus from GlazeWM
 
+## 📁 Project Structure
+
+```
+glazewm-tray/
+├── config.py                  # ← User settings (colors, URL, toggles) — edit this file
+├── run.py                     # ← Entry point: python run.py (rename to .pyw for silent mode)
+├── glazewm_tray/              # Internal package (no need to edit)
+│   ├── __init__.py
+│   ├── app.py                 # Main application class
+│   ├── floating_bar.py        # Taskbar floating bar widget
+│   ├── icons.py               # Win32 app icon extraction
+│   └── win32.py               # Win32 API constants and helpers
+└── README.md
+```
+
 ## 🛠️ Prerequisites
 
 This tool requires **Python 3.x**. Open your terminal and run the following command to install the necessary libraries:
@@ -46,7 +72,7 @@ pip install pystray pillow websocket-client
 Run the script using the standard Python command. This will keep a command prompt window open, which is helpful for seeing status messages and error logs:
 
 ```bash
-python glazewm_tray.py
+python run.py
 ```
 
 You'll see console output like:
@@ -59,7 +85,7 @@ Connected to GlazeWM event stream (WebSocket)
 ### 2. The "Silent" Way (Background Mode)
 To run the tool without a command prompt window cluttering your taskbar:
 
-1. Rename your file from `glazewm_tray.py` to `glazewm_tray.pyw`
+1. Rename `run.py` to `run.pyw`
 2. Double-click the `.pyw` file
 3. The script will now run invisibly in the background, appearing only as an icon in your System Tray
 
@@ -72,12 +98,14 @@ To run the tool without a command prompt window cluttering your taskbar:
 To have your tray indicator start every time you log in:
 
 1. Press `Win + R`, type `shell:startup`, and press Enter
-2. Right-click your `glazewm_tray.pyw` file and select **Create Shortcut**
+2. Right-click your `run.pyw` file and select **Create Shortcut**
 3. Move that shortcut into the Startup folder you just opened
 
 **Pro Tip**: Use the `.pyw` version for startup to avoid having a command window appear on boot.
 
 ## 🎛️ Configuration
+
+All settings live in `config.py` at the project root. This is the **only file you need to edit**.
 
 ### Display Mode
 Both the floating bar and tray icon are enabled by default. You can disable either one:
@@ -92,7 +120,7 @@ BAR_BG_COLOR = None      # None = transparent background, or set to (r, g, b) e.
 The auto-toggle feature automatically runs the tiling direction toggle command (equivalent to Alt+V) whenever a new window is detected. This helps maintain optimal layouts as you open new applications.
 
 **To disable auto-toggle**:
-1. Set `AUTO_TOGGLE_TILING = False` at the top of the script, OR
+1. Set `AUTO_TOGGLE_TILING = False` in `config.py`, OR
 2. Right-click the tray icon → Uncheck "Auto-Toggle on New Window"
 
 You can toggle this setting on/off at any time without restarting the application.
@@ -105,14 +133,14 @@ QUERY_DEBOUNCE = 0.3  # Seconds to wait after burst events (window managed/unman
 ```
 
 ### WebSocket URL
-If GlazeWM is running on a non-default port, change the URL at the top of the script:
+If GlazeWM is running on a non-default port, change the URL in `config.py`:
 
 ```python
 GLAZEWM_WS_URL = "ws://127.0.0.1:6123"
 ```
 
 ### Visual Customization
-You can adjust the appearance by editing the `COLORS` dictionary at the top of the script:
+You can adjust the appearance by editing the `COLORS` dictionary in `config.py`:
 
 ```python
 COLORS = {
