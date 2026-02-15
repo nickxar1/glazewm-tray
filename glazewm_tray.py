@@ -332,6 +332,50 @@ def _is_fullscreen_active():
             rect.right >= mr.right and rect.bottom >= mr.bottom)
 
 
+SW_RESTORE = 9
+
+
+def _restore_minimized_by_process(process_names):
+    """Find minimized windows belonging to given process names and restore them.
+    process_names should be a set of lowercase process name strings."""
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+
+    # Build pid -> process_name map for target processes
+    target_pids = set()
+    snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snapshot == -1:
+        return
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        if kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+            while True:
+                exe = entry.szExeFile.lower()
+                # Match "explorer.exe" against "explorer" or "explorer.exe"
+                if exe in process_names or exe.replace('.exe', '') in process_names:
+                    target_pids.add(entry.th32ProcessID)
+                if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+                    break
+    finally:
+        kernel32.CloseHandle(snapshot)
+
+    if not target_pids:
+        return
+
+    # Enumerate windows and restore minimized ones belonging to target pids
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def enum_callback(hwnd, _lparam):
+        if user32.IsIconic(hwnd) and user32.IsWindowVisible(hwnd):
+            proc_id = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
+            if proc_id.value in target_pids:
+                user32.ShowWindow(hwnd, SW_RESTORE)
+        return True
+
+    user32.EnumWindows(enum_callback, 0)
+
+
 # --- Floating Bar ---
 
 class FloatingBar:
@@ -450,6 +494,29 @@ class FloatingBar:
         """Run a GlazeWM command in a background thread to avoid blocking tk."""
         threading.Thread(target=self.app.run_cmd, args=(cmd,), daemon=True).start()
 
+    def _focus_workspace(self, name):
+        """Focus workspace and restore any minimized windows on it."""
+        # Get process names for this workspace before switching
+        with self.app._lock:
+            processes = set()
+            for ws in self.app.all_workspaces:
+                if ws['name'] == name:
+                    for win in ws.get('windows', []):
+                        p = win.get('process', '')
+                        if p:
+                            processes.add(p.lower())
+                    break
+
+        def _do():
+            self.app.run_cmd(f"focus --workspace {name}")
+            if not processes:
+                return
+            time.sleep(0.1)
+            # Restore minimized windows belonging to workspace processes
+            _restore_minimized_by_process(processes)
+
+        threading.Thread(target=_do, daemon=True).start()
+
     def _build_context_menu(self):
         """Build right-click context menu matching pystray menu."""
         menu = tk.Menu(self.bar, tearoff=0,
@@ -530,7 +597,7 @@ class FloatingBar:
                                  fg=self._rgb(num_fg), bg=num_bg,
                                  padx=4, pady=0, cursor="hand2")
             num_label.pack(side=tk.LEFT, padx=(2, 1))
-            num_label.bind('<Button-1>', lambda e, n=name: self._run_cmd_async(f"focus --workspace {n}"))
+            num_label.bind('<Button-1>', lambda e, n=name: self._focus_workspace(n))
             total_width += 28
 
             # Window icons + short process name
@@ -567,7 +634,7 @@ class FloatingBar:
                 if not self._icons_only:
                     click_targets.append(name_lbl)
                 for w in click_targets:
-                    w.bind('<Button-1>', lambda e, n=name: self._run_cmd_async(f"focus --workspace {n}"))
+                    w.bind('<Button-1>', lambda e, n=name: self._focus_workspace(n))
 
         total_width += self.PADDING
         total_width = max(total_width, 60)
