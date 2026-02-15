@@ -5,7 +5,7 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 ## ✨ Features
 
 ### Display Modes (both enabled by default)
-* **Floating Bar**: A wider bar that sits on the taskbar (left of the system tray) showing workspace numbers with real app icons for each window. Click any workspace to switch to it. Auto-hides during fullscreen apps (games, videos, etc.). Transparent background by default — can be toggled on/off from the tray icon menu.
+* **Floating Bar**: A wider bar that sits on the taskbar (left of the system tray) showing workspace numbers with real app icons for each window. Click any workspace to switch to it. Auto-hides during fullscreen apps (games, videos, etc.). Semi-transparent by default — toggle between transparent and opaque dark background from the tray right-click menu.
 * **Tray Icon**: Compact system tray icon showing up to 3 workspace numbers with a blue underline on the focused one. Right-click for full workspace menu with window titles.
 
 ### Core Functionality
@@ -13,7 +13,7 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 * **Window List per Workspace**: Shows window app icons (floating bar) or titles (tray menu) under each workspace
 * **Focus Tracking**: Highlights your active workspace with blue
 * **Occupancy Indicators**: Workspaces with windows are marked with `●`, empty ones with `○`
-* **Event-Driven Updates**: Reacts instantly to GlazeWM events via WebSocket — no polling, zero CPU when idle
+* **Event-Driven Updates**: Focus and workspace events refresh instantly via WebSocket; burst events (window open/close) debounce briefly to avoid conflicts. Zero CPU when idle
 * **Window Counter**: Displays total number of open windows across all workspaces
 
 ### Window Management
@@ -98,10 +98,10 @@ The auto-toggle feature automatically runs the tiling direction toggle command (
 You can toggle this setting on/off at any time without restarting the application.
 
 ### Debounce Delay
-After GlazeWM events stop firing, the tray waits before querying to avoid hitting GlazeWM during critical moments (e.g. window creation). Default is 1 second:
+Focus and workspace events refresh instantly. Burst events (window open/close) debounce briefly to avoid hitting GlazeWM during critical moments. Default is 0.3 seconds:
 
 ```python
-QUERY_DEBOUNCE = 1.0  # Seconds to wait after last event before querying
+QUERY_DEBOUNCE = 0.3  # Seconds to wait after burst events (window managed/unmanaged) before querying
 ```
 
 ### WebSocket URL
@@ -137,8 +137,12 @@ Right-click the tray icon to access:
 | **Close Window** | Close the currently focused window |
 | **Auto-Toggle on New Window** | Enable/disable automatic tiling toggle |
 | **Floating Bar** | Toggle the floating bar visibility on/off |
+| **Dark Background** | Switch between semi-transparent and fully opaque dark background |
+| **Icons Only** | Hide process name text, show only app icons (compact mode) |
+| **Position: Left** | Toggle bar between left side and right side (near tray) of taskbar |
 | **Redraw Windows** | Redraw all managed windows |
 | **Reload GlazeWM** | Reload GlazeWM configuration |
+| **Restart** | Restart the tray tool (spawns new instance and exits current) |
 | **Exit Tray Tool** | Close the tray application |
 
 ## ⚠️ Troubleshooting

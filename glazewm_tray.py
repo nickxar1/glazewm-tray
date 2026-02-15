@@ -23,7 +23,7 @@ COLORS = {
 
 GLAZEWM_WS_URL = "ws://127.0.0.1:6123"
 AUTO_TOGGLE_TILING = True  # Set to False to disable auto-toggle feature
-QUERY_DEBOUNCE = 1.0  # Seconds to wait after last event before querying
+QUERY_DEBOUNCE = 0.3  # Seconds to wait after burst events (window managed/unmanaged) before querying
 USE_FLOATING_BAR = True  # Set False to disable the floating bar
 USE_TRAY_ICON = True     # Set False to disable the tray icon
 BAR_BG_COLOR = None      # None = transparent background, or set to (r, g, b) tuple e.g. (20, 20, 20)
@@ -35,6 +35,14 @@ SUBSCRIBE_EVENTS = [
     "tiling_direction_changed", "binding_modes_changed",
     "focused_container_moved", "pause_changed"
 ]
+
+# Events that should refresh immediately (no debounce)
+IMMEDIATE_EVENTS = frozenset({
+    'focus_changed', 'workspace_activated',
+    'workspace_deactivated', 'workspace_updated',
+    'focused_container_moved', 'tiling_direction_changed',
+    'binding_modes_changed', 'pause_changed',
+})
 
 # Win32 constants
 WS_EX_NOACTIVATE = 0x08000000
@@ -333,8 +341,8 @@ class FloatingBar:
     ICON_SIZE = 16
     PADDING = 6
 
-    # Color used as transparency key (should not appear in UI elements)
-    _TRANSPARENT_KEY = '#f0f0f0'
+    # Color key for transparent mode — a green nobody uses in the UI
+    _TRANSPARENT_KEY = '#01fe01'
 
     def __init__(self, app):
         self.app = app
@@ -345,17 +353,22 @@ class FloatingBar:
         self.bar.overrideredirect(True)  # Borderless
         self.bar.attributes('-topmost', True)
 
-        # Determine background: transparent or solid color
+        # Determine background: transparent or solid dark
+        # _bg_hex = window/frame bg (transparent key or dark)
+        # _widget_bg = label/content bg (always dark for clean text rendering)
         self._transparent = BAR_BG_COLOR is None
+        self._position_right = True  # True = right side (near tray), False = left side
+        self._icons_only = False    # True = hide process name text, show only icons
+        self._widget_bg = self._rgb(COLORS["bg"])
         if self._transparent:
             self._bg_hex = self._TRANSPARENT_KEY
             self.bar.configure(bg=self._TRANSPARENT_KEY)
             self.bar.attributes('-transparentcolor', self._TRANSPARENT_KEY)
         else:
-            self._bg_hex = self._rgb(BAR_BG_COLOR)
+            self._bg_hex = self._widget_bg
             self.bar.configure(bg=self._bg_hex)
 
-        # Container frame
+        # Container frame — uses transparent key in transparent mode
         self.frame = tk.Frame(self.bar, bg=self._bg_hex)
         self.frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
@@ -385,13 +398,12 @@ class FloatingBar:
         return f'#{color_tuple[0]:02x}{color_tuple[1]:02x}{color_tuple[2]:02x}'
 
     def _position_bar(self, width=300):
-        """Position bar on the taskbar, to the left of the system tray."""
+        """Position bar on the taskbar (right side near tray, or left side)."""
         user32 = ctypes.windll.user32
 
-        # Find the taskbar and tray notification area
+        # Find the taskbar
         taskbar_hwnd = user32.FindWindowW("Shell_TrayWnd", None)
         if not taskbar_hwnd:
-            # Fallback: bottom-right of screen
             screen_w = self.root.winfo_screenwidth()
             screen_h = self.root.winfo_screenheight()
             self.bar.geometry(f'{width}x{self.BAR_HEIGHT}+{screen_w - width - 8}+{screen_h - self.BAR_HEIGHT}')
@@ -401,15 +413,18 @@ class FloatingBar:
         taskbar_rect = wintypes.RECT()
         user32.GetWindowRect(taskbar_hwnd, ctypes.byref(taskbar_rect))
 
-        # Find the tray notification area to position left of it
-        tray_hwnd = user32.FindWindowExW(taskbar_hwnd, None, "TrayNotifyWnd", None)
-        if tray_hwnd:
-            tray_rect = wintypes.RECT()
-            user32.GetWindowRect(tray_hwnd, ctypes.byref(tray_rect))
-            # Place bar just to the left of the tray area
-            x = tray_rect.left - width - 4
+        if self._position_right:
+            # Right side: just left of the tray notification area
+            tray_hwnd = user32.FindWindowExW(taskbar_hwnd, None, "TrayNotifyWnd", None)
+            if tray_hwnd:
+                tray_rect = wintypes.RECT()
+                user32.GetWindowRect(tray_hwnd, ctypes.byref(tray_rect))
+                x = tray_rect.left - width - 4
+            else:
+                x = taskbar_rect.right - width - 200
         else:
-            x = taskbar_rect.right - width - 200
+            # Left side: just right of the Start button area
+            x = taskbar_rect.left + 4
 
         # Vertically center on the taskbar
         taskbar_h = taskbar_rect.bottom - taskbar_rect.top
@@ -471,6 +486,13 @@ class FloatingBar:
         if self._bar_hidden:
             return  # Skip rebuilding while hidden
 
+        # Re-assert topmost so bar stays visible after monitor/workspace switches
+        try:
+            self.bar.attributes('-topmost', True)
+            self.bar.lift()
+        except tk.TclError:
+            pass
+
         # Clear existing widgets
         for widget in self.frame.winfo_children():
             widget.destroy()
@@ -482,7 +504,7 @@ class FloatingBar:
         if not workspaces:
             lbl = tk.Label(self.frame, text="?" if self.app.error_count <= 3 else "!",
                            fg=self._rgb(COLORS["error"] if self.app.error_count > 3 else COLORS["text"]),
-                           bg=self._bg_hex,
+                           bg=self._widget_bg,
                            font=("Arial", 12, "bold"))
             lbl.pack(side=tk.LEFT, padx=4)
             self._position_bar(60)
@@ -502,7 +524,7 @@ class FloatingBar:
                 total_width += 7
 
             # Workspace number
-            num_bg = self._rgb(COLORS["active"]) if is_focused else self._bg_hex
+            num_bg = self._rgb(COLORS["active"]) if is_focused else self._widget_bg
             num_fg = COLORS["text"] if has_windows or is_focused else COLORS["inactive"]
             num_label = tk.Label(self.frame, text=name, font=("Arial", 11, "bold"),
                                  fg=self._rgb(num_fg), bg=num_bg,
@@ -517,7 +539,7 @@ class FloatingBar:
                 title = win.get('title', '') or process or '?'
 
                 # Container for icon + label side by side
-                win_frame = tk.Frame(self.frame, bg=self._bg_hex, cursor="hand2")
+                win_frame = tk.Frame(self.frame, bg=self._widget_bg, cursor="hand2")
                 win_frame.pack(side=tk.LEFT, padx=(2, 0))
 
                 # Try to get real icon
@@ -526,21 +548,25 @@ class FloatingBar:
                     icon_img = _make_fallback_icon(process[:1].upper() if process else '?', self.ICON_SIZE)
                 photo = ImageTk.PhotoImage(icon_img)
                 self._photo_refs.append(photo)
-                icon_lbl = tk.Label(win_frame, image=photo, bg=self._bg_hex)
+                icon_lbl = tk.Label(win_frame, image=photo, bg=self._widget_bg)
                 icon_lbl.pack(side=tk.LEFT)
 
-                # Short process name label
-                short_name = process[:8] if process else '?'
-                name_lbl = tk.Label(win_frame, text=short_name, font=("Arial", 7),
-                                    fg=self._rgb(COLORS["inactive"]),
-                                    bg=self._bg_hex)
-                name_lbl.pack(side=tk.LEFT, padx=(1, 0))
-
-                # Estimate width: icon + text
-                total_width += self.ICON_SIZE + len(short_name) * 5 + 6
+                # Short process name label (hidden in icons-only mode)
+                if not self._icons_only:
+                    short_name = process[:8] if process else '?'
+                    name_lbl = tk.Label(win_frame, text=short_name, font=("Arial", 7),
+                                        fg=self._rgb(COLORS["text"]),
+                                        bg=self._widget_bg)
+                    name_lbl.pack(side=tk.LEFT, padx=(1, 0))
+                    total_width += self.ICON_SIZE + len(short_name) * 5 + 6
+                else:
+                    total_width += self.ICON_SIZE + 4
 
                 # Click any part to switch workspace
-                for w in (win_frame, icon_lbl, name_lbl):
+                click_targets = [win_frame, icon_lbl]
+                if not self._icons_only:
+                    click_targets.append(name_lbl)
+                for w in click_targets:
                     w.bind('<Button-1>', lambda e, n=name: self._run_cmd_async(f"focus --workspace {n}"))
 
         total_width += self.PADDING
@@ -548,7 +574,9 @@ class FloatingBar:
         self._position_bar(total_width)
 
     def _check_fullscreen(self):
-        """Periodically check if a fullscreen app is active and hide/show bar."""
+        """Periodically check if a fullscreen app is active and hide/show bar.
+        Also re-shows the bar if it was hidden by 'Show Desktop' or other
+        external events (the bar.state() becomes 'withdrawn')."""
         try:
             if self._manually_hidden:
                 pass  # Stay hidden when manually toggled off
@@ -557,13 +585,41 @@ class FloatingBar:
                     self.bar.withdraw()
                     self._bar_hidden = True
             else:
+                # Always re-assert visibility — covers Show Desktop hiding us
+                # without setting _bar_hidden, and normal fullscreen recovery
+                self.bar.deiconify()
+                self.bar.attributes('-topmost', True)
                 if self._bar_hidden:
-                    self.bar.deiconify()
                     self._bar_hidden = False
+                    self.update_bar()  # Refresh position and content
         except Exception:
             pass
-        # Check every 2 seconds
-        self.root.after(2000, self._check_fullscreen)
+        # Check every 1 second for faster show/hide response
+        self.root.after(1000, self._check_fullscreen)
+
+    def toggle_icons_only(self):
+        """Switch between icons+text and icons-only mode."""
+        self._icons_only = not self._icons_only
+        self.update_bar()
+
+    def toggle_position(self):
+        """Switch between right side (near tray) and left side of taskbar."""
+        self._position_right = not self._position_right
+        self.update_bar()
+
+    def toggle_background(self):
+        """Switch between transparent and dark background."""
+        self._transparent = not self._transparent
+        if self._transparent:
+            self._bg_hex = self._TRANSPARENT_KEY
+            self.bar.configure(bg=self._TRANSPARENT_KEY)
+            self.bar.attributes('-transparentcolor', self._TRANSPARENT_KEY)
+        else:
+            self._bg_hex = self._widget_bg
+            self.bar.configure(bg=self._bg_hex)
+            self.bar.attributes('-transparentcolor', '')
+        self.frame.configure(bg=self._bg_hex)
+        self.update_bar()
 
     def schedule_update(self):
         """Thread-safe: schedule a bar update on the tk mainloop."""
@@ -827,9 +883,11 @@ class GlazeTrayApp:
                     event_data = event.get('data', {})
                     event_type = event_data.get('eventType', '')
 
-                    # Mark dirty and wake the debounce loop
+                    # Focus/workspace events refresh immediately; others debounce
                     self._last_event_time = time.time()
                     self._dirty = True
+                    if event_type in IMMEDIATE_EVENTS:
+                        self._immediate = True
                     self._event.set()
 
                     # Auto-toggle tiling direction on new window (immediate)
@@ -964,11 +1022,26 @@ class GlazeTrayApp:
         ))
 
         # Toggle floating bar visibility
-        if self.bar:
+        if USE_FLOATING_BAR:
             menu_items.append(item(
                 "Floating Bar",
                 lambda: self._toggle_floating_bar(),
                 checked=lambda _: self.bar is not None and not self.bar._manually_hidden
+            ))
+            menu_items.append(item(
+                "Dark Background",
+                lambda: self._toggle_bar_background(),
+                checked=lambda _: self.bar is not None and not self.bar._transparent
+            ))
+            menu_items.append(item(
+                "Icons Only",
+                lambda: self._toggle_icons_only(),
+                checked=lambda _: self.bar is not None and self.bar._icons_only
+            ))
+            menu_items.append(item(
+                "Position: Left",
+                lambda: self._toggle_bar_position(),
+                checked=lambda _: self.bar is not None and not self.bar._position_right
             ))
 
         menu_items.append(pystray.Menu.SEPARATOR)
@@ -978,9 +1051,28 @@ class GlazeTrayApp:
         if self.last_error and self.error_count > 3:
             menu_items.append(item(f"Warning: {self.last_error[:30]}...", lambda: None, enabled=False))
 
+        menu_items.append(item("Restart", self.restart))
         menu_items.append(item("Exit Tray Tool", self.on_exit))
 
         return pystray.Menu(*menu_items)
+
+    def _toggle_bar_background(self):
+        """Toggle the floating bar between transparent and dark background."""
+        if not self.bar:
+            return
+        self.bar.root.after_idle(self.bar.toggle_background)
+
+    def _toggle_icons_only(self):
+        """Toggle between icons+text and icons-only mode."""
+        if not self.bar:
+            return
+        self.bar.root.after_idle(self.bar.toggle_icons_only)
+
+    def _toggle_bar_position(self):
+        """Toggle the floating bar between left and right side of taskbar."""
+        if not self.bar:
+            return
+        self.bar.root.after_idle(self.bar.toggle_position)
 
     def _toggle_floating_bar(self):
         """Toggle the floating bar visibility from the tray menu."""
@@ -1000,6 +1092,18 @@ class GlazeTrayApp:
         """Wait for pystray to create its window, then set WS_EX_NOACTIVATE."""
         time.sleep(1)
         make_process_windows_unfocusable()
+
+    def restart(self, icon=None, item=None):
+        """Restart the application by spawning a new process and exiting."""
+        import subprocess
+        script = os.path.abspath(sys.argv[0])
+        # Use pythonw for .pyw files to stay silent, otherwise python
+        if script.endswith('.pyw'):
+            executable = sys.executable.replace('python.exe', 'pythonw.exe')
+        else:
+            executable = sys.executable
+        subprocess.Popen([executable, script], creationflags=0x00000008)  # DETACHED_PROCESS
+        self.on_exit(icon, item)
 
     def on_exit(self, icon=None, item=None):
         """Clean shutdown."""
