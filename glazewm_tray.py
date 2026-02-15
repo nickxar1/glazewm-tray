@@ -26,6 +26,7 @@ AUTO_TOGGLE_TILING = True  # Set to False to disable auto-toggle feature
 QUERY_DEBOUNCE = 1.0  # Seconds to wait after last event before querying
 USE_FLOATING_BAR = True  # Set False to disable the floating bar
 USE_TRAY_ICON = True     # Set False to disable the tray icon
+BAR_BG_COLOR = None      # None = transparent background, or set to (r, g, b) tuple e.g. (20, 20, 20)
 
 # Events to subscribe to
 SUBSCRIBE_EVENTS = [
@@ -332,6 +333,9 @@ class FloatingBar:
     ICON_SIZE = 16
     PADDING = 6
 
+    # Color used as transparency key (should not appear in UI elements)
+    _TRANSPARENT_KEY = '#f0f0f0'
+
     def __init__(self, app):
         self.app = app
         self.root = tk.Tk()
@@ -340,21 +344,31 @@ class FloatingBar:
         self.bar = tk.Toplevel(self.root)
         self.bar.overrideredirect(True)  # Borderless
         self.bar.attributes('-topmost', True)
-        self.bar.configure(bg=self._rgb(COLORS["bg"]))
+
+        # Determine background: transparent or solid color
+        self._transparent = BAR_BG_COLOR is None
+        if self._transparent:
+            self._bg_hex = self._TRANSPARENT_KEY
+            self.bar.configure(bg=self._TRANSPARENT_KEY)
+            self.bar.attributes('-transparentcolor', self._TRANSPARENT_KEY)
+        else:
+            self._bg_hex = self._rgb(BAR_BG_COLOR)
+            self.bar.configure(bg=self._bg_hex)
 
         # Container frame
-        self.frame = tk.Frame(self.bar, bg=self._rgb(COLORS["bg"]))
+        self.frame = tk.Frame(self.bar, bg=self._bg_hex)
         self.frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
         # Keep references to PhotoImages so they're not garbage collected
         self._photo_refs = []
 
-        # Right-click context menu
+        # Right-click context menu (disabled — kept for future use)
         self._context_menu = self._build_context_menu()
-        self.bar.bind('<Button-3>', self._show_context_menu)
+        # self.bar.bind('<Button-3>', self._show_context_menu)
 
         # Fullscreen tracking
         self._bar_hidden = False
+        self._manually_hidden = False  # True when toggled off via tray menu
 
         # Position bar bottom-right, above taskbar
         self._position_bar()
@@ -468,7 +482,7 @@ class FloatingBar:
         if not workspaces:
             lbl = tk.Label(self.frame, text="?" if self.app.error_count <= 3 else "!",
                            fg=self._rgb(COLORS["error"] if self.app.error_count > 3 else COLORS["text"]),
-                           bg=self._rgb(COLORS["bg"]),
+                           bg=self._bg_hex,
                            font=("Arial", 12, "bold"))
             lbl.pack(side=tk.LEFT, padx=4)
             self._position_bar(60)
@@ -488,10 +502,10 @@ class FloatingBar:
                 total_width += 7
 
             # Workspace number
-            num_bg = COLORS["active"] if is_focused else COLORS["bg"]
+            num_bg = self._rgb(COLORS["active"]) if is_focused else self._bg_hex
             num_fg = COLORS["text"] if has_windows or is_focused else COLORS["inactive"]
             num_label = tk.Label(self.frame, text=name, font=("Arial", 11, "bold"),
-                                 fg=self._rgb(num_fg), bg=self._rgb(num_bg),
+                                 fg=self._rgb(num_fg), bg=num_bg,
                                  padx=4, pady=0, cursor="hand2")
             num_label.pack(side=tk.LEFT, padx=(2, 1))
             num_label.bind('<Button-1>', lambda e, n=name: self._run_cmd_async(f"focus --workspace {n}"))
@@ -503,7 +517,7 @@ class FloatingBar:
                 title = win.get('title', '') or process or '?'
 
                 # Container for icon + label side by side
-                win_frame = tk.Frame(self.frame, bg=self._rgb(COLORS["bg"]), cursor="hand2")
+                win_frame = tk.Frame(self.frame, bg=self._bg_hex, cursor="hand2")
                 win_frame.pack(side=tk.LEFT, padx=(2, 0))
 
                 # Try to get real icon
@@ -512,14 +526,14 @@ class FloatingBar:
                     icon_img = _make_fallback_icon(process[:1].upper() if process else '?', self.ICON_SIZE)
                 photo = ImageTk.PhotoImage(icon_img)
                 self._photo_refs.append(photo)
-                icon_lbl = tk.Label(win_frame, image=photo, bg=self._rgb(COLORS["bg"]))
+                icon_lbl = tk.Label(win_frame, image=photo, bg=self._bg_hex)
                 icon_lbl.pack(side=tk.LEFT)
 
                 # Short process name label
                 short_name = process[:8] if process else '?'
                 name_lbl = tk.Label(win_frame, text=short_name, font=("Arial", 7),
                                     fg=self._rgb(COLORS["inactive"]),
-                                    bg=self._rgb(COLORS["bg"]))
+                                    bg=self._bg_hex)
                 name_lbl.pack(side=tk.LEFT, padx=(1, 0))
 
                 # Estimate width: icon + text
@@ -536,7 +550,9 @@ class FloatingBar:
     def _check_fullscreen(self):
         """Periodically check if a fullscreen app is active and hide/show bar."""
         try:
-            if _is_fullscreen_active():
+            if self._manually_hidden:
+                pass  # Stay hidden when manually toggled off
+            elif _is_fullscreen_active():
                 if not self._bar_hidden:
                     self.bar.withdraw()
                     self._bar_hidden = True
@@ -947,6 +963,14 @@ class GlazeTrayApp:
             checked=lambda item: AUTO_TOGGLE_TILING
         ))
 
+        # Toggle floating bar visibility
+        if self.bar:
+            menu_items.append(item(
+                "Floating Bar",
+                lambda: self._toggle_floating_bar(),
+                checked=lambda _: self.bar is not None and not self.bar._manually_hidden
+            ))
+
         menu_items.append(pystray.Menu.SEPARATOR)
         menu_items.append(item("Redraw Windows (Alt+Shift+W)", lambda: self.run_cmd("wm-redraw")))
         menu_items.append(item("Reload GlazeWM", lambda: self.run_cmd("reload-config")))
@@ -957,6 +981,20 @@ class GlazeTrayApp:
         menu_items.append(item("Exit Tray Tool", self.on_exit))
 
         return pystray.Menu(*menu_items)
+
+    def _toggle_floating_bar(self):
+        """Toggle the floating bar visibility from the tray menu."""
+        if not self.bar:
+            return
+        if self.bar._manually_hidden:
+            self.bar._manually_hidden = False
+            self.bar._bar_hidden = False
+            self.bar.bar.deiconify()
+            self.bar.schedule_update()
+        else:
+            self.bar._manually_hidden = True
+            self.bar._bar_hidden = True
+            self.bar.bar.withdraw()
 
     def _apply_noactivate_delayed(self):
         """Wait for pystray to create its window, then set WS_EX_NOACTIVATE."""

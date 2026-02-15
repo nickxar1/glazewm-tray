@@ -5,7 +5,7 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 ## ✨ Features
 
 ### Display Modes (both enabled by default)
-* **Floating Bar**: A wider bar that sits on the taskbar (left of the system tray) showing workspace numbers with real app icons for each window. Click any workspace to switch to it. Auto-hides during fullscreen apps (games, videos, etc.).
+* **Floating Bar**: A wider bar that sits on the taskbar (left of the system tray) showing workspace numbers with real app icons for each window. Click any workspace to switch to it. Auto-hides during fullscreen apps (games, videos, etc.). Transparent background by default — can be toggled on/off from the tray icon menu.
 * **Tray Icon**: Compact system tray icon showing up to 3 workspace numbers with a blue underline on the focused one. Right-click for full workspace menu with window titles.
 
 ### Core Functionality
@@ -85,6 +85,7 @@ Both the floating bar and tray icon are enabled by default. You can disable eith
 ```python
 USE_FLOATING_BAR = True  # Set False to disable the floating bar on the taskbar
 USE_TRAY_ICON = True     # Set False to disable the system tray icon
+BAR_BG_COLOR = None      # None = transparent background, or set to (r, g, b) e.g. (20, 20, 20)
 ```
 
 ### Auto-Toggle Tiling Feature
@@ -135,6 +136,7 @@ Right-click the tray icon to access:
 | **Toggle Tiling (Alt+V)** | Manually toggle tiling direction |
 | **Close Window** | Close the currently focused window |
 | **Auto-Toggle on New Window** | Enable/disable automatic tiling toggle |
+| **Floating Bar** | Toggle the floating bar visibility on/off |
 | **Redraw Windows** | Redraw all managed windows |
 | **Reload GlazeWM** | Reload GlazeWM configuration |
 | **Exit Tray Tool** | Close the tray application |
