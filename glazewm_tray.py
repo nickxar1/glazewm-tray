@@ -618,9 +618,17 @@ class FloatingBar:
                 icon_lbl = tk.Label(win_frame, image=photo, bg=self._widget_bg)
                 icon_lbl.pack(side=tk.LEFT)
 
-                # Short process name label (hidden in icons-only mode)
+                # Short window title label (hidden in icons-only mode)
                 if not self._icons_only:
-                    short_name = process[:8] if process else '?'
+                    # Use window title for a meaningful label, fall back to process name
+                    display = title if title and title != process else process
+                    # Strip common suffixes for cleaner display
+                    for suffix in (' - Google Chrome', ' - Chrome', ' — Mozilla Firefox',
+                                   ' - Microsoft Edge', ' - Notepad', ' - Visual Studio Code'):
+                        if display.endswith(suffix):
+                            display = display[:-len(suffix)]
+                            break
+                    short_name = display[:12] if display else '?'
                     name_lbl = tk.Label(win_frame, text=short_name, font=("Arial", 7),
                                         fg=self._rgb(COLORS["text"]),
                                         bg=self._widget_bg)
