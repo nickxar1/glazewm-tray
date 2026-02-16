@@ -98,10 +98,23 @@ def make_process_windows_unfocusable():
 
 
 def is_fullscreen_active():
-    """Check if the foreground window is fullscreen (covers entire monitor)."""
+    """Check if the foreground window is fullscreen (covers entire monitor).
+
+    Excludes desktop windows (Progman, WorkerW) and the taskbar
+    (Shell_TrayWnd) so that "Show Desktop" doesn't trigger fullscreen hiding.
+    """
     user32 = ctypes.windll.user32
     hwnd = user32.GetForegroundWindow()
     if not hwnd:
+        return False
+
+    # Exclude desktop and taskbar — these cover the full monitor but aren't
+    # fullscreen apps.  "Show Desktop" (Win+D / bottom-right click) makes
+    # the desktop the foreground window and would otherwise hide the bar.
+    class_buf = ctypes.create_unicode_buffer(256)
+    user32.GetClassNameW(hwnd, class_buf, 256)
+    if class_buf.value in ("Progman", "WorkerW", "Shell_TrayWnd",
+                           "Shell_SecondaryTrayWnd"):
         return False
 
     rect = wintypes.RECT()
