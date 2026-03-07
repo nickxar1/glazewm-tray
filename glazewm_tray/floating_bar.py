@@ -7,6 +7,7 @@ import tkinter as tk
 from PIL import ImageTk
 
 import config
+from . import settings as _settings
 from .icons import get_process_icon, make_fallback_icon
 from .win32 import (
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, GWL_EXSTYLE,
@@ -33,10 +34,11 @@ class FloatingBar:
         self.bar.overrideredirect(True)  # Borderless
         self.bar.attributes('-topmost', True)
 
-        # Determine background: transparent or solid dark
-        self._transparent = config.BAR_BG_COLOR is None
-        self._position_right = True  # True = right side (near tray), False = left side
-        self._icons_only = False    # True = hide process name text, show only icons
+        # Load persisted settings (override config.py defaults)
+        _s = _settings.load()
+        self._transparent = _s['transparent']
+        self._position_right = _s['position_right']
+        self._icons_only = _s['icons_only']
         self._widget_bg = self._rgb(config.COLORS["bg"])
         if self._transparent:
             self._bg_hex = self._TRANSPARENT_KEY
@@ -57,14 +59,18 @@ class FloatingBar:
         self._context_menu = self._build_context_menu()
 
         # Fullscreen tracking
-        self._bar_hidden = False
-        self._manually_hidden = False  # True when toggled off via tray menu
+        self._manually_hidden = _s['bar_hidden']  # True when toggled off via tray menu
+        self._bar_hidden = self._manually_hidden
 
         # Position bar bottom-right, above taskbar
         self._position_bar()
 
         # Apply Win32 flags after window is mapped
         self.bar.after(100, self._apply_win32_flags)
+
+        # If bar was hidden when last closed, withdraw it after flags are set
+        if self._manually_hidden:
+            self.bar.after(150, self.bar.withdraw)
 
         # Start fullscreen check loop (every 2 seconds)
         self._check_fullscreen()
@@ -285,11 +291,13 @@ class FloatingBar:
         """Switch between icons+text and icons-only mode."""
         self._icons_only = not self._icons_only
         self.update_bar()
+        self.app._save_settings()
 
     def toggle_position(self):
         """Switch between right side (near tray) and left side of taskbar."""
         self._position_right = not self._position_right
         self.update_bar()
+        self.app._save_settings()
 
     def toggle_background(self):
         """Switch between transparent and dark background."""
@@ -304,6 +312,7 @@ class FloatingBar:
             self.bar.attributes('-transparentcolor', '')
         self.frame.configure(bg=self._bg_hex)
         self.update_bar()
+        self.app._save_settings()
 
     def schedule_update(self):
         """Thread-safe: schedule a bar update on the tk mainloop."""

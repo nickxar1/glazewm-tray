@@ -48,12 +48,14 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 ```
 glazewm-tray/
 ├── config.py                  # ← User settings (colors, URL, toggles) — edit this file
+├── settings.ini               # ← Auto-generated: persists runtime toggle states across restarts
 ├── run.py                     # ← Entry point: python run.py (rename to .pyw for silent mode)
 ├── glazewm_tray/              # Internal package (no need to edit)
 │   ├── __init__.py
 │   ├── app.py                 # Main application class
 │   ├── floating_bar.py        # Taskbar floating bar widget
 │   ├── icons.py               # Win32 app icon extraction
+│   ├── settings.py            # Persistent settings loader/saver
 │   └── win32.py               # Win32 API constants and helpers
 └── README.md
 ```
@@ -92,6 +94,23 @@ To run the tool without a command prompt window cluttering your taskbar:
 ### 3. How to Stop the Tool
 * **If running as .py**: Close the command prompt window or press `Ctrl+C`
 * **If running as .pyw**: Right-click the icon in the System Tray and select **Exit Tray Tool**
+
+## 💾 Persistent Settings
+
+The tray tool automatically remembers your runtime toggle choices across restarts. After the first run, a `settings.ini` file is created next to `run.py` with the following values:
+
+```ini
+[glazewm]
+auto_toggle_tiling = true
+icons_only = false
+position_right = true
+transparent = true
+bar_hidden = false
+```
+
+These are updated automatically whenever you toggle an option from the tray menu — no manual editing needed. If you want to reset to defaults, simply delete `settings.ini`.
+
+> **Note**: `config.py` still controls the initial defaults on a fresh install. `settings.ini` takes priority once it exists.
 
 ## ⚙️ Start Automatically with Windows
 

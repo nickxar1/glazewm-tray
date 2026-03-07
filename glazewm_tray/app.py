@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 import websocket
 
 import config
+from . import settings as _settings
 from .floating_bar import FloatingBar
 from .icons import get_process_icon
 from .win32 import make_process_windows_unfocusable
@@ -378,6 +379,7 @@ class GlazeTrayApp:
             config.AUTO_TOGGLE_TILING = not config.AUTO_TOGGLE_TILING
             status = "enabled" if config.AUTO_TOGGLE_TILING else "disabled"
             print(f"Auto-toggle tiling {status}")
+            self._save_settings()
 
         menu_items.append(item(
             "Auto-Toggle on New Window",
@@ -446,6 +448,17 @@ class GlazeTrayApp:
             self.bar._manually_hidden = True
             self.bar._bar_hidden = True
             self.bar.bar.withdraw()
+        self._save_settings()
+
+    def _save_settings(self):
+        """Persist current toggle states to settings.ini."""
+        _settings.save({
+            'auto_toggle_tiling': config.AUTO_TOGGLE_TILING,
+            'icons_only': self.bar._icons_only if self.bar else False,
+            'position_right': self.bar._position_right if self.bar else True,
+            'transparent': self.bar._transparent if self.bar else (config.BAR_BG_COLOR is None),
+            'bar_hidden': self.bar._manually_hidden if self.bar else False,
+        })
 
     def _apply_noactivate_delayed(self):
         time.sleep(1)
@@ -485,6 +498,10 @@ class GlazeTrayApp:
 
     def run(self):
         """Start the tray application."""
+        # Apply persisted settings before anything starts
+        _s = _settings.load()
+        config.AUTO_TOGGLE_TILING = _s['auto_toggle_tiling']
+
         print("Starting GlazeWM tray application...")
         print(f"Auto-toggle tiling: {'enabled' if config.AUTO_TOGGLE_TILING else 'disabled'}")
         print(f"Floating bar: {'enabled' if config.USE_FLOATING_BAR else 'disabled'}")
