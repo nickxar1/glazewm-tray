@@ -39,6 +39,7 @@ class FloatingBar:
         self._transparent = _s['transparent']
         self._position_right = _s['position_right']
         self._icons_only = _s['icons_only']
+        self._label_left = _s['label_left']
         self._widget_bg = self._rgb(config.COLORS["bg"])
         if self._transparent:
             self._bg_hex = self._TRANSPARENT_KEY
@@ -223,16 +224,16 @@ class FloatingBar:
             num_label = tk.Label(self.frame, text=name, font=("Arial", 11, "bold"),
                                  fg=self._rgb(num_fg), bg=num_bg,
                                  padx=4, pady=0, cursor="hand2")
-            num_label.pack(side=tk.LEFT, padx=(2, 1))
             num_label.bind('<Button-1>', lambda e, n=name: self._focus_workspace(n))
             total_width += 28
 
+            # Build icon frames first (without packing yet)
+            win_frames = []
             for win in windows:
                 process = win.get('process', '')
                 title = win.get('title', '') or process or '?'
 
                 win_frame = tk.Frame(self.frame, bg=self._widget_bg, cursor="hand2")
-                win_frame.pack(side=tk.LEFT, padx=(2, 0))
 
                 icon_img = get_process_icon(process, self.ICON_SIZE)
                 if not icon_img:
@@ -242,6 +243,7 @@ class FloatingBar:
                 icon_lbl = tk.Label(win_frame, image=photo, bg=self._widget_bg)
                 icon_lbl.pack(side=tk.LEFT)
 
+                click_targets = [win_frame, icon_lbl]
                 if not self._icons_only:
                     display = title if title and title != process else process
                     for suffix in (' - Google Chrome', ' - Chrome', ' — Mozilla Firefox',
@@ -255,14 +257,23 @@ class FloatingBar:
                                         bg=self._widget_bg)
                     name_lbl.pack(side=tk.LEFT, padx=(1, 0))
                     total_width += self.ICON_SIZE + len(short_name) * 5 + 6
+                    click_targets.append(name_lbl)
                 else:
                     total_width += self.ICON_SIZE + 4
 
-                click_targets = [win_frame, icon_lbl]
-                if not self._icons_only:
-                    click_targets.append(name_lbl)
                 for w in click_targets:
                     w.bind('<Button-1>', lambda e, n=name: self._focus_workspace(n))
+                win_frames.append(win_frame)
+
+            # Pack number label and icon frames in configured order
+            if self._label_left:
+                num_label.pack(side=tk.LEFT, padx=(2, 1))
+                for wf in win_frames:
+                    wf.pack(side=tk.LEFT, padx=(2, 0))
+            else:
+                for wf in win_frames:
+                    wf.pack(side=tk.LEFT, padx=(2, 0))
+                num_label.pack(side=tk.LEFT, padx=(1, 2))
 
         total_width += self.PADDING
         total_width = max(total_width, 60)
@@ -296,6 +307,12 @@ class FloatingBar:
     def toggle_position(self):
         """Switch between right side (near tray) and left side of taskbar."""
         self._position_right = not self._position_right
+        self.update_bar()
+        self.app._save_settings()
+
+    def toggle_label_side(self):
+        """Switch workspace number between left and right of its icons."""
+        self._label_left = not self._label_left
         self.update_bar()
         self.app._save_settings()
 

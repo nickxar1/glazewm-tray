@@ -14,6 +14,7 @@ _DEFAULTS = {
     'position_right': True,
     'transparent': True,
     'bar_hidden': False,
+    'label_left': True,
 }
 
 

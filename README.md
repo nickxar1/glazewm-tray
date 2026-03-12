@@ -106,6 +106,7 @@ icons_only = false
 position_right = true
 transparent = true
 bar_hidden = false
+label_left = true
 ```
 
 These are updated automatically whenever you toggle an option from the tray menu — no manual editing needed. If you want to reset to defaults, simply delete `settings.ini`.
@@ -187,6 +188,7 @@ Right-click the tray icon to access:
 | **Dark Background** | Switch between semi-transparent and fully opaque dark background |
 | **Icons Only** | Hide process name text, show only app icons (compact mode) |
 | **Position: Left** | Toggle bar between left side and right side (near tray) of taskbar |
+| **Label Right of Icons** | Move the workspace number to the right of its icons (`[icons] [no]` vs `[no] [icons]`) |
 | **Redraw Windows** | Redraw all managed windows |
 | **Reload GlazeWM** | Reload GlazeWM configuration |
 | **Restart** | Restart the tray tool (spawns new instance and exits current) |
