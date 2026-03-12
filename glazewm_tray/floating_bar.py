@@ -40,6 +40,7 @@ class FloatingBar:
         self._position_right = _s['position_right']
         self._icons_only = _s['icons_only']
         self._label_left = _s['label_left']
+        self._workspace_gap = _s['workspace_gap']
         self._widget_bg = self._rgb(config.COLORS["bg"])
         if self._transparent:
             self._bg_hex = self._TRANSPARENT_KEY
@@ -216,8 +217,8 @@ class FloatingBar:
 
             if i > 0:
                 sep = tk.Frame(self.frame, width=1, bg=self._rgb(config.COLORS["inactive"]))
-                sep.pack(side=tk.LEFT, fill=tk.Y, padx=3, pady=4)
-                total_width += 7
+                sep.pack(side=tk.LEFT, fill=tk.Y, padx=self._workspace_gap, pady=4)
+                total_width += 1 + self._workspace_gap * 2
 
             num_bg = self._rgb(config.COLORS["active"]) if is_focused else self._widget_bg
             num_fg = config.COLORS["text"] if has_windows or is_focused else config.COLORS["inactive"]
@@ -313,6 +314,12 @@ class FloatingBar:
     def toggle_label_side(self):
         """Switch workspace number between left and right of its icons."""
         self._label_left = not self._label_left
+        self.update_bar()
+        self.app._save_settings()
+
+    def toggle_workspace_gap(self):
+        """Switch between compact (3px) and wide (12px) spacing between workspaces."""
+        self._workspace_gap = 12 if self._workspace_gap <= 3 else 3
         self.update_bar()
         self.app._save_settings()
 

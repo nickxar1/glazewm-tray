@@ -49,7 +49,8 @@ A lightweight, minimal system tray utility for GlazeWM. This tool replaces the n
 glazewm-tray/
 ├── config.py                  # ← User settings (colors, URL, toggles) — edit this file
 ├── settings.ini               # ← Auto-generated: persists runtime toggle states across restarts
-├── run.py                     # ← Entry point: python run.py (rename to .pyw for silent mode)
+├── glazewm_tray.pyw           # ← Double-click to run silently (no console window)
+├── run.py                     # ← Entry point for debugging: python run.py
 ├── glazewm_tray/              # Internal package (no need to edit)
 │   ├── __init__.py
 │   ├── app.py                 # Main application class
@@ -95,6 +96,30 @@ To run the tool without a command prompt window cluttering your taskbar:
 * **If running as .py**: Close the command prompt window or press `Ctrl+C`
 * **If running as .pyw**: Right-click the icon in the System Tray and select **Exit Tray Tool**
 
+## 🚀 Quickstart — Run it Silently & at Startup
+
+The easiest way to use this tool is to just double-click **`glazewm_tray.pyw`** — no terminal, no setup, it appears straight in your system tray.
+
+### Add to Windows Startup
+
+To have it launch automatically every time you log in:
+
+1. Press `Win + R`, type `shell:startup`, and press **Enter**
+   - This opens: `C:\Users\<your name>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup`
+2. Right-click `glazewm_tray.pyw` → **Create Shortcut**
+3. Move the shortcut into the Startup folder
+
+### Allow it in Windows Startup Settings
+
+Windows may disable new startup entries by default. To make sure it's enabled:
+
+1. Press `Ctrl + Shift + Esc` to open **Task Manager**
+2. Click the **Startup apps** tab
+3. Find **glazewm_tray** (or **pythonw**) in the list
+4. Right-click → **Enable**
+
+After this, the tray icon will appear automatically on every login.
+
 ## 💾 Persistent Settings
 
 The tray tool automatically remembers your runtime toggle choices across restarts. After the first run, a `settings.ini` file is created next to `run.py` with the following values:
@@ -107,6 +132,7 @@ position_right = true
 transparent = true
 bar_hidden = false
 label_left = true
+workspace_gap = 3
 ```
 
 These are updated automatically whenever you toggle an option from the tray menu — no manual editing needed. If you want to reset to defaults, simply delete `settings.ini`.
@@ -189,6 +215,7 @@ Right-click the tray icon to access:
 | **Icons Only** | Hide process name text, show only app icons (compact mode) |
 | **Position: Left** | Toggle bar between left side and right side (near tray) of taskbar |
 | **Label Right of Icons** | Move the workspace number to the right of its icons (`[icons] [no]` vs `[no] [icons]`) |
+| **Wide Workspace Spacing** | Toggle between compact (3px) and wide (12px) gap between workspace sections |
 | **Redraw Windows** | Redraw all managed windows |
 | **Reload GlazeWM** | Reload GlazeWM configuration |
 | **Restart** | Restart the tray tool (spawns new instance and exits current) |

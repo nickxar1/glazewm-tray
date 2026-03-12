@@ -413,6 +413,11 @@ class GlazeTrayApp:
                 lambda: self._toggle_label_side(),
                 checked=lambda _: self.bar is not None and not self.bar._label_left
             ))
+            menu_items.append(item(
+                "Wide Workspace Spacing",
+                lambda: self._toggle_workspace_gap(),
+                checked=lambda _: self.bar is not None and self.bar._workspace_gap > 3
+            ))
 
         menu_items.append(pystray.Menu.SEPARATOR)
         menu_items.append(item("Redraw Windows (Alt+Shift+W)", lambda: self.run_cmd("wm-redraw")))
@@ -446,6 +451,11 @@ class GlazeTrayApp:
             return
         self.bar.root.after_idle(self.bar.toggle_label_side)
 
+    def _toggle_workspace_gap(self):
+        if not self.bar:
+            return
+        self.bar.root.after_idle(self.bar.toggle_workspace_gap)
+
     def _toggle_floating_bar(self):
         if not self.bar:
             return
@@ -469,6 +479,7 @@ class GlazeTrayApp:
             'transparent': self.bar._transparent if self.bar else (config.BAR_BG_COLOR is None),
             'bar_hidden': self.bar._manually_hidden if self.bar else False,
             'label_left': self.bar._label_left if self.bar else True,
+            'workspace_gap': self.bar._workspace_gap if self.bar else 3,
         })
 
     def _apply_noactivate_delayed(self):
